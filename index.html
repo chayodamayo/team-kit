@@ -72,6 +72,12 @@ h2.sec{font-family:var(--display);font-weight:400;font-size:clamp(34px,5vw,52px)
 .summary strong{font-family:var(--display);font-weight:400;font-size:34px}
 .msg{margin-top:12px;font-weight:600}.msg.ok{color:#0E7A3F}.msg.err{color:#B3261E}.msg.note{color:#3B4A60;font-weight:500}
 .off{position:absolute;left:-9999px}
+.done{text-align:center}
+.done h3{font-family:var(--display);font-weight:400;font-size:40px;margin:6px 0}
+.done .num{font-weight:700;color:var(--blue);font-size:20px}
+.done svg{width:150px;margin:10px auto;display:block}
+.done .row{justify-content:center;flex-wrap:wrap;margin-top:14px}
+.demo{background:#FFF4E5;border:2px dashed #E8A33D;border-radius:12px;padding:12px 14px;font-size:15px;margin-bottom:16px}
 footer{background:var(--navy);color:#C5D0E0;padding:30px 0;font-size:15px}
 footer .wrap{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
 @media (max-width:820px){.hero .wrap{grid-template-columns:1fr}.stage{order:-1}.float{width:min(80%,320px)}.protos{grid-template-columns:1fr}.panel{max-width:none}}
@@ -124,7 +130,7 @@ footer .wrap{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
 
 <section class="order" id="order"><div class="wrap">
   <h2 class="sec">Order for your team</h2>
-  <p class="sub">Your chosen design is included. Tell us the sizes and how to reach you.</p>
+  <p class="sub">Your chosen design is included. Add your shipping info and sizes, then place your order.</p>
   <div class="box">
     <div class="chosen"><div id="chosenSvg"></div><div><strong id="chosenName"></strong><div id="chosenNote" style="color:#3B4A60;font-size:15px"></div></div></div>
     <form name="teamkit-order" method="POST" data-netlify="true" netlify-honeypot="bot-field" id="orderForm">
@@ -135,11 +141,26 @@ footer .wrap{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
         <div class="field" style="min-width:200px"><label for="coach">Your name</label><input type="text" id="coach" name="name" required autocomplete="name"></div>
         <div class="field" style="min-width:200px"><label for="email">Email</label><input type="email" id="email" name="email" required autocomplete="email"></div>
       </div>
+      <div class="field"><label for="addr">Shipping address</label><input type="text" id="addr" name="address" required autocomplete="street-address"></div>
+      <div class="row" style="flex-wrap:wrap">
+        <div class="field" style="min-width:140px"><label for="city">City</label><input type="text" id="city" name="city" required autocomplete="address-level2"></div>
+        <div class="field" style="min-width:110px"><label for="prov">Province</label><input type="text" id="prov" name="province" required autocomplete="address-level1"></div>
+        <div class="field" style="min-width:110px"><label for="post">Postal code</label><input type="text" id="post" name="postal" required autocomplete="postal-code"></div>
+      </div>
       <div class="field"><span class="lab">How many of each size?</span><div class="sizes" id="sizes"></div></div>
       <div class="summary" aria-live="polite"><span id="sumText">0 jerseys</span><strong id="sumTotal">$0</strong></div>
-      <button class="go" type="submit" id="submitBtn">Send my order</button>
+      <div class="demo"><strong>Demo checkout:</strong> no real payment is taken and no card info is asked for. Feel free to use made-up shipping info.</div>
+      <button class="go" type="submit" id="submitBtn">Place order</button>
       <div class="msg" id="msg" role="status"></div>
     </form>
+    <div class="done hidden" id="done" role="status">
+      <div id="doneSvg"></div>
+      <h3>Order placed!</h3>
+      <div class="num" id="doneNum"></div>
+      <p id="doneText"></p>
+      <p style="color:#3B4A60;font-size:15px">Demo mode: no payment was taken.</p>
+      <div class="row"><button class="alt" type="button" onclick="window.print()">Print receipt</button><button class="go" type="button" onclick="location.reload()">Start a new order</button></div>
+    </div>
   </div>
 </div></section>
 
@@ -206,29 +227,44 @@ function clean(list){
     pattern:PATTERNS.includes(d.pattern)?d.pattern:"solid",note:String(d.note||"").slice(0,90)}))
     .filter(d=>d.body&&d.trim).slice(0,3);
 }
-function fallback(){
-  const pal=[["#D7263D","#1A1A1A"],["#0B1F3A","#FFD600"],["#1B9E5A","#FFFFFF"],["#6B3FD1","#14D9F0"],["#0B6FE8","#FF6B1A"],["#1A1A1A","#E8420A"],["#FFFFFF","#0B6FE8"]]
-    .sort(()=>Math.random()-.5), pat=[...PATTERNS].sort(()=>Math.random()-.5);
-  return [0,1,2].map(i=>({name:"Quick concept "+"ABC"[i],body:pal[i][0],trim:pal[i][1],pattern:pat[i],note:"A fast sample while the AI designer is offline."}));
+const COLORS = {red:["#B71C1C","#FF5252"],blue:["#0B6FE8","#8FC2FF"],navy:["#0B1F3A","#3A5378"],green:["#1B7F4B","#6FE0A0"],yellow:["#FFD600","#FFF176"],gold:["#C9A227","#FFE082"],orange:["#E8420A","#FFAB76"],purple:["#6B3FD1","#C7B2FF"],pink:["#E8548F","#FFB3D1"],teal:["#0F9D9A","#7FE8E4"],black:["#1A1A1A","#555555"],white:["#FFFFFF","#D8DEE8"],gray:["#6B7280","#C4C9D2"],grey:["#6B7280","#C4C9D2"]};
+function fallback(text){
+  const found = Object.keys(COLORS).filter(k=>new RegExp("\\b"+k+"\\b","i").test(text||""));
+  const pat = [...PATTERNS].sort(()=>Math.random()-.5);
+  const pick = (n)=>{
+    if(found.length >= 2){ const [a,b] = [COLORS[found[0]],COLORS[found[1]]]; return n===0?{body:a[0],trim:b[0]}:n===1?{body:b[0],trim:a[0]}:{body:a[0],trim:b[1]}; }
+    if(found.length === 1){ const c = COLORS[found[0]]; return n===0?{body:c[0],trim:c[1]}:n===1?{body:c[1],trim:c[0]}:{body:c[0],trim:c[0]}; }
+    const rnd = [["#D7263D","#1A1A1A"],["#0B1F3A","#FFD600"],["#1B9E5A","#FFFFFF"]]; return {body:rnd[n][0],trim:rnd[n][1]};
+  };
+  return [0,1,2].map(i=>({name:"Offline concept "+"ABC"[i],...pick(i),pattern:pat[i],note:"Made without AI, using the colors you asked for."}));
 }
 async function generate(feedback){
   const payload = {sport:$("sport").value,team:$("team").value,vibe:$("vibe").value,
     current:feedback?{body:cur.body,trim:cur.trim,pattern:cur.pattern}:null,feedback:feedback||""};
+  const text = (feedback ? feedback+" " : "") + $("vibe").value;
+  let why = "";
   try{
     const res = await fetch("/.netlify/functions/design",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-    if(!res.ok) throw new Error();
-    const out = clean((await res.json()).designs);
-    if(out.length < 3) throw new Error();
-    return {designs:out,ai:true};
-  }catch(_){ return {designs:fallback(),ai:false}; }
+    if(res.status === 404) why = "the AI function isn't deployed on this site (404)";
+    else{
+      const data = await res.json().catch(()=>({}));
+      if(!res.ok) why = data.error || ("error "+res.status);
+      else{
+        const out = clean(data.designs);
+        if(out.length >= 3) return {designs:out,ai:true,why:""};
+        why = "the AI sent back designs I couldn't read";
+      }
+    }
+  }catch(_){ why = "couldn't reach the AI function (are you on the live Netlify site?)"; }
+  return {designs:fallback(text),ai:false,why};
 }
 async function run(feedback, btn, msg){
   btn.disabled = true; const label = btn.textContent; btn.textContent = "Designing...";
   msg.className = "msg note"; msg.textContent = "Our designer is sketching three options...";
-  const {designs, ai} = await generate(feedback);
+  const {designs, ai, why} = await generate(feedback);
   protos = designs; cur = designs[0]; showCurrent(); renderProtos();
   $("protos").classList.remove("hidden");
-  msg.textContent = ai ? "Done! Scroll down to see your prototypes." : "The AI designer isn't reachable right now, so these are quick sample designs.";
+  msg.textContent = ai ? "Done! Scroll down to see your prototypes." : "AI problem: " + why + ". Showing offline designs that use your colors.";
   btn.disabled = false; btn.textContent = label;
   if(!feedback) $("protos").scrollIntoView({behavior:"smooth"});
 }
@@ -236,7 +272,7 @@ $("studio").addEventListener("submit", e=>{ e.preventDefault(); run("", $("genBt
 $("remakeBtn").addEventListener("click", ()=>{
   const fb = $("fb").value.trim();
   if(!fb){ $("remakeMsg").textContent = "Type what you'd like changed first."; return; }
-  run(fb, $("remakeBtn"), $("remakeMsg")).then(()=>{ $("remakeMsg").textContent = "New designs are ready above."; });
+  run(fb, $("remakeBtn"), $("remakeMsg"));
 });
 $("contBtn").addEventListener("click", ()=> $("order").scrollIntoView({behavior:"smooth"}));
 ["team","num"].forEach(id=>$(id).addEventListener("input",()=>{ showCurrent(); if(protos.length) renderProtos(); }));
@@ -255,16 +291,22 @@ function totals(){
 $("orderForm").addEventListener("submit", async e=>{
   e.preventDefault();
   const msg = $("msg"), btn = $("submitBtn"); msg.className = "msg";
-  if(!count()){ msg.classList.add("err"); msg.textContent = "Enter at least one jersey size before sending."; return; }
+  if(!count()){ msg.classList.add("err"); msg.textContent = "Enter at least one jersey size before placing your order."; return; }
+  const n = count(), each = n >= 20 ? 32 : 35, total = n*each;
+  const orderNo = "TK-" + Math.floor(10000 + Math.random()*90000);
   $("designField").value = `${cur.name} | Team: ${$("team").value} | Number: ${$("num").value} | Jersey ${cur.body} | Trim ${cur.trim} | Pattern ${cur.pattern}`;
-  btn.disabled = true; btn.textContent = "Sending...";
+  const fd = new FormData(e.target); fd.append("order-number", orderNo); fd.append("total", "$"+total);
+  btn.disabled = true; btn.textContent = "Placing order...";
   try{
-    const res = await fetch("/",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams(new FormData(e.target)).toString()});
+    const res = await fetch("/",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams(fd).toString()});
     if(!res.ok) throw new Error();
-    msg.classList.add("ok"); msg.textContent = "Order sent. We'll email you to confirm the details.";
-    e.target.reset(); totals();
-  }catch(_){ msg.classList.add("err"); msg.textContent = "The order didn't send. Check your connection and try again."; }
-  btn.disabled = false; btn.textContent = "Send my order";
+    $("doneSvg").innerHTML = jerseySVG(cur,"done");
+    $("doneNum").textContent = "Order " + orderNo;
+    $("doneText").textContent = `${n} ${$("team").value} jersey${n===1?"":"s"}, total $${total}. A confirmation would be emailed to ${$("email").value}.`;
+    e.target.classList.add("hidden"); document.querySelector(".chosen").classList.add("hidden");
+    $("done").classList.remove("hidden"); $("done").scrollIntoView({behavior:"smooth"});
+  }catch(_){ msg.classList.add("err"); msg.textContent = "The order didn't go through. Check your connection and try again."; }
+  btn.disabled = false; btn.textContent = "Place order";
 });
 showCurrent(); totals();
 </script>
