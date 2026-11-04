@@ -16,19 +16,26 @@ const reply = (statusCode, obj) => ({
   body: JSON.stringify(obj),
 });
 
-async function callGemini(model, key, text, withMime) {
+async function callGemini(model, key, text, withMime, timeoutMs) {
+  const generationConfig = { temperature: 0.9, maxOutputTokens: 700 };
+  if (withMime) generationConfig.responseMimeType = "application/json";
+  // Turn off "thinking" on 2.5 models so the answer comes back fast.
+  if (/2\.5/.test(model)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
   const body = {
     systemInstruction: { parts: [{ text: SYSTEM }] },
     contents: [{ role: "user", parts: [{ text }] }],
-    generationConfig: withMime
-      ? { responseMimeType: "application/json", temperature: 0.9 }
-      : { temperature: 0.9 },
+    generationConfig,
   };
-  return fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": key },
     body: JSON.stringify(body),
+    signal: ctrl.signal,
   });
+  } finally { clearTimeout(timer); }
 }
 
 exports.handler = async (event) => {
@@ -52,12 +59,16 @@ exports.handler = async (event) => {
   }
   const prompt = lines.join("\n");
 
-  const models = [process.env.GEMINI_MODEL, "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash"].filter(Boolean);
+  // Netlify cuts functions off after about 10 seconds, so stop trying before that.
+  const started = Date.now();
+  const left = () => 8500 - (Date.now() - started);
+  const models = [process.env.GEMINI_MODEL, "gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-flash-latest"].filter(Boolean);
   let lastError = "Unknown error";
   for (const model of models) {
+    if (left() < 1500) { lastError = "Gemini was too slow (timed out). Try again."; break; }
     try {
-      let res = await callGemini(model, key, prompt, true);
-      if (res.status === 400) res = await callGemini(model, key, prompt, false);
+      let res = await callGemini(model, key, prompt, true, left());
+      if (res.status === 400 && left() > 1500) res = await callGemini(model, key, prompt, false, left());
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         lastError = `Gemini ${res.status} on ${model}: ${String(data.error?.message || "").slice(0, 140)}`;
@@ -69,9 +80,10 @@ exports.handler = async (event) => {
       if (!parsed.designs?.length) { lastError = "Gemini returned no designs"; continue; }
       return reply(200, { designs: parsed.designs, model });
     } catch (e) {
-      lastError = "Could not read Gemini's answer on " + model;
+      lastError = e.name === "AbortError"
+        ? `Gemini was too slow on ${model} (timed out)`
+        : "Could not read Gemini's answer on " + model;
     }
   }
   return reply(502, { error: lastError });
 };
-
