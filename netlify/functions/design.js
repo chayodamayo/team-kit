@@ -17,7 +17,7 @@ const reply = (statusCode, obj) => ({
 });
 
 async function callGemini(model, key, text, withMime, timeoutMs) {
-  const generationConfig = { temperature: 0.9, maxOutputTokens: 700 };
+  const generationConfig = { temperature: 0.9, maxOutputTokens: 2000 };
   if (withMime) generationConfig.responseMimeType = "application/json";
   // Turn off "thinking" on 2.5 models so the answer comes back fast.
   if (/2\.5/.test(model)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
@@ -62,18 +62,23 @@ exports.handler = async (event) => {
   // Netlify cuts functions off after about 10 seconds, so stop trying before that.
   const started = Date.now();
   const left = () => 8500 - (Date.now() - started);
-  const models = [process.env.GEMINI_MODEL, "gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-flash-latest"].filter(Boolean);
+  const models = [process.env.GEMINI_MODEL, "gemini-flash-lite-latest", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-2.5-flash"].filter(Boolean);
   let lastError = "Unknown error";
   for (const model of models) {
     if (left() < 1500) { lastError = "Gemini was too slow (timed out). Try again."; break; }
     try {
       let res = await callGemini(model, key, prompt, true, left());
       if (res.status === 400 && left() > 1500) res = await callGemini(model, key, prompt, false, left());
+      // Overloaded or rate limited: wait a moment and retry the same model once.
+      if ([429, 500, 502, 503].includes(res.status) && left() > 3000) {
+        await new Promise((r) => setTimeout(r, 800));
+        res = await callGemini(model, key, prompt, true, left());
+      }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         lastError = `Gemini ${res.status} on ${model}: ${String(data.error?.message || "").slice(0, 140)}`;
-        if (res.status === 404) continue;            // model name not available, try the next one
-        return reply(502, { error: lastError });      // key problems, rate limits, etc.
+        if ([404, 429, 500, 502, 503].includes(res.status)) continue; // unavailable or busy: try the next model
+        return reply(502, { error: lastError });      // key problems etc.
       }
       const raw = (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
       const parsed = JSON.parse(raw.replace(/```json|```/g, "").trim());
